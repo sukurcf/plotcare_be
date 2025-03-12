@@ -3,39 +3,34 @@ name: Get Issue Events for Last 7 Days
 on:
   workflow_dispatch:
 
-permissions:
-  issues: read  # ✅ Ensure the action has permission to read issues
-
 jobs:
   fetch-issue-events:
-    runs-on: ubuntu-latest  # ✅ Uses GitHub default runners
+    runs-on: ubuntu-latest
     steps:
       - name: Get all issues and their events
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-          OWNER: ${{ github.repository_owner }}  # ✅ Dynamic owner
-          REPO: "plotcare_be"  # ✅ Replace with actual repo name
+          OWNER: "sukurcf"  # Replace with actual owner
+          REPO: "plotcare_be"    # Replace with actual repo name
         run: |
           echo "Fetching all issues from $OWNER/$REPO..."
           
-          # Fetch all issues (open & closed) with error handling
-          RESPONSE=$(curl -s -H "Authorization: token $GH_TOKEN" \
-                               -H "Accept: application/vnd.github.v3+json" \
-                               "https://api.github.com/repos/$OWNER/$REPO/issues?state=all&per_page=100")
-          
-          # Validate API response
-          if echo "$RESPONSE" | jq -e . >/dev/null 2>&1; then
-            echo "API response is valid JSON"
-          else
-            echo "❌ Invalid API response"
-            exit 1
-          fi
+          # Fetch all issues (open & closed)
+          ISSUES=$(curl -s -H "Authorization: token $GH_TOKEN" \
+                           -H "Accept: application/vnd.github.v3+json" \
+                           "https://api.github.com/repos/$OWNER/$REPO/issues?state=all&per_page=100")
 
-          # Ensure response is an array, then extract issue numbers
-          ISSUE_NUMBERS=$(echo "$RESPONSE" | jq -r 'if type == "array" then .[].number else empty end')
+          # Debugging: Print API response
+          echo "API Response: $ISSUES"
+
+          # Validate JSON to prevent jq errors
+          echo "$ISSUES" | jq .
+
+          # Ensure it's an array, then extract issue numbers
+          ISSUE_NUMBERS=$(echo "$ISSUES" | jq -r 'if type == "array" then .[].number else empty end')
 
           if [ -z "$ISSUE_NUMBERS" ]; then
-            echo "❌ No issues found or API error."
+            echo "No issues found or API returned an error."
             exit 1
           fi
 
@@ -44,31 +39,22 @@ jobs:
           # Get date 7 days ago
           SEVEN_DAYS_AGO=$(date -u -d "7 days ago" +"%Y-%m-%dT%H:%M:%SZ")
 
-          # Loop through each issue and fetch events
+          # Loop through each issue and fetch its events
           for ISSUE in $ISSUE_NUMBERS; do
             echo "Fetching events for Issue #$ISSUE..."
             
             EVENTS=$(curl -s -H "Authorization: token $GH_TOKEN" \
-                                 -H "Accept: application/vnd.github.v3+json" \
-                                 "https://api.github.com/repos/$OWNER/$REPO/issues/$ISSUE/events")
+                             -H "Accept: application/vnd.github.v3+json" \
+                             "https://api.github.com/repos/$OWNER/$REPO/issues/$ISSUE/events")
 
-            # Handle API rate limits
-            if echo "$EVENTS" | jq -e '.message? | contains("API rate limit exceeded")' >/dev/null; then
-              echo "❌ API rate limit exceeded! Exiting..."
-              exit 1
-            fi
+            # Debugging: Print events
+            echo "$EVENTS" | jq .
 
-            # Ensure valid JSON before processing
-            if ! echo "$EVENTS" | jq -e . >/dev/null 2>&1; then
-              echo "❌ Invalid JSON for issue #$ISSUE. Skipping..."
-              continue
-            fi
-
-            # Extract user, association, and timestamp for events in the last 7 days
+            # Filter events from the last 7 days and extract user & timestamp
             echo "$EVENTS" | jq -r --arg DATE "$SEVEN_DAYS_AGO" --arg ISSUE "$ISSUE" '
               if type == "array" then
                 map(select(.created_at >= $DATE)) | 
-                map("Issue #\($ISSUE): \(.actor.login) (\(.actor.association // "UNKNOWN")) changed issue at \(.created_at)") |
+                map("Issue #\($ISSUE): \(.actor.login) changed issue at \(.created_at)") |
                 .[]
               else
                 empty
