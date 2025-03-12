@@ -1,0 +1,62 @@
+name: Get Issue Events for Last 7 Days
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fetch-issue-events:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get all issues and their events
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: "swamysmart"  # Replace with actual owner
+          REPO: "plotcare-be-node"    # Replace with actual repo name
+        run: |
+          echo "Fetching all issues from $OWNER/$REPO..."
+          
+          # Fetch all issues (open & closed)
+          ISSUES=$(curl -s -H "Authorization: token $GH_TOKEN" \
+                           -H "Accept: application/vnd.github.v3+json" \
+                           "https://api.github.com/repos/$OWNER/$REPO/issues?state=all&per_page=100")
+
+          # Debugging: Print API response
+          echo "API Response: $ISSUES"
+
+          # Validate JSON to prevent jq errors
+          echo "$ISSUES" | jq .
+
+          # Ensure it's an array, then extract issue numbers
+          ISSUE_NUMBERS=$(echo "$ISSUES" | jq -r 'if type == "array" then .[].number else empty end')
+
+          if [ -z "$ISSUE_NUMBERS" ]; then
+            echo "No issues found or API returned an error."
+            exit 1
+          fi
+
+          echo "Processing issues: $ISSUE_NUMBERS"
+
+          # Get date 7 days ago
+          SEVEN_DAYS_AGO=$(date -u -d "7 days ago" +"%Y-%m-%dT%H:%M:%SZ")
+
+          # Loop through each issue and fetch its events
+          for ISSUE in $ISSUE_NUMBERS; do
+            echo "Fetching events for Issue #$ISSUE..."
+            
+            EVENTS=$(curl -s -H "Authorization: token $GH_TOKEN" \
+                             -H "Accept: application/vnd.github.v3+json" \
+                             "https://api.github.com/repos/$OWNER/$REPO/issues/$ISSUE/events")
+
+            # Debugging: Print events
+            echo "$EVENTS" | jq .
+
+            # Filter events from the last 7 days and extract user & timestamp
+            echo "$EVENTS" | jq -r --arg DATE "$SEVEN_DAYS_AGO" --arg ISSUE "$ISSUE" '
+              if type == "array" then
+                map(select(.created_at >= $DATE)) | 
+                map("Issue #\($ISSUE): \(.actor.login) changed issue at \(.created_at)") |
+                .[]
+              else
+                empty
+              end'
+          done
