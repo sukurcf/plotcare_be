@@ -1,62 +1,109 @@
-name: Get Issue Events for Last 7 Days
+name: Get All Repository Activity
 
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+  issues: read
+  discussions: read
+  pull-requests: read
+
 jobs:
-  fetch-issue-events:
+  fetch-repo-activity:
     runs-on: ubuntu-latest
     steps:
-      - name: Get all issues and their events
+      - name: Get Repository Activity
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-          OWNER: "sukurcf"  # Replace with actual owner
-          REPO: "plotcare_be"    # Replace with actual repo name
+          OWNER: ${{ github.repository_owner }}
+          REPO: "plotcare_be"  # ✅ Replace with your repo name
         run: |
-          echo "Fetching all issues from $OWNER/$REPO..."
-          
-          # Fetch all issues (open & closed)
-          ISSUES=$(curl -s -H "Authorization: token $GH_TOKEN" \
-                           -H "Accept: application/vnd.github.v3+json" \
-                           "https://api.github.com/repos/$OWNER/$REPO/issues?state=all&per_page=100")
-
-          # Debugging: Print API response
-          echo "API Response: $ISSUES"
-
-          # Validate JSON to prevent jq errors
-          echo "$ISSUES" | jq .
-
-          # Ensure it's an array, then extract issue numbers
-          ISSUE_NUMBERS=$(echo "$ISSUES" | jq -r 'if type == "array" then .[].number else empty end')
-
-          if [ -z "$ISSUE_NUMBERS" ]; then
-            echo "No issues found or API returned an error."
-            exit 1
-          fi
-
-          echo "Processing issues: $ISSUE_NUMBERS"
+          echo "Fetching all activity from $OWNER/$REPO..."
 
           # Get date 7 days ago
           SEVEN_DAYS_AGO=$(date -u -d "7 days ago" +"%Y-%m-%dT%H:%M:%SZ")
 
-          # Loop through each issue and fetch its events
+          ##########################
+          # 1️⃣ Get Repository Events
+          ##########################
+          echo "Fetching repository events..."
+          REPO_EVENTS=$(curl -s -H "Authorization: token $GH_TOKEN" \
+                              -H "Accept: application/vnd.github.v3+json" \
+                              "https://api.github.com/repos/$OWNER/$REPO/events")
+          
+          echo "$REPO_EVENTS" | jq -r --arg DATE "$SEVEN_DAYS_AGO" '
+            map(select(.created_at >= $DATE)) |
+            map("\(.type) by \(.actor.login) at \(.created_at)") | .[]
+          '
+
+          ##########################
+          # 2️⃣ Get Issue Events
+          ##########################
+          echo "Fetching issues..."
+          ISSUES=$(curl -s -H "Authorization: token $GH_TOKEN" \
+                           -H "Accept: application/vnd.github.v3+json" \
+                           "https://api.github.com/repos/$OWNER/$REPO/issues?state=all&per_page=100")
+
+          ISSUE_NUMBERS=$(echo "$ISSUES" | jq -r 'if type == "array" then .[].number else empty end')
+
           for ISSUE in $ISSUE_NUMBERS; do
             echo "Fetching events for Issue #$ISSUE..."
-            
             EVENTS=$(curl -s -H "Authorization: token $GH_TOKEN" \
-                             -H "Accept: application/vnd.github.v3+json" \
-                             "https://api.github.com/repos/$OWNER/$REPO/issues/$ISSUE/events")
+                                 -H "Accept: application/vnd.github.v3+json" \
+                                 "https://api.github.com/repos/$OWNER/$REPO/issues/$ISSUE/events")
 
-            # Debugging: Print events
-            echo "$EVENTS" | jq .
-
-            # Filter events from the last 7 days and extract user & timestamp
             echo "$EVENTS" | jq -r --arg DATE "$SEVEN_DAYS_AGO" --arg ISSUE "$ISSUE" '
-              if type == "array" then
-                map(select(.created_at >= $DATE)) | 
-                map("Issue #\($ISSUE): \(.actor.login) changed issue at \(.created_at)") |
-                .[]
-              else
-                empty
-              end'
+              map(select(.created_at >= $DATE)) |
+              map("Issue #\($ISSUE): \(.actor.login) (\(.actor.association // "UNKNOWN")) at \(.created_at)") |
+              .[]
+            '
           done
+
+          ##########################
+          # 3️⃣ Get Pull Request Events
+          ##########################
+          echo "Fetching pull requests..."
+          PULL_REQUESTS=$(curl -s -H "Authorization: token $GH_TOKEN" \
+                                -H "Accept: application/vnd.github.v3+json" \
+                                "https://api.github.com/repos/$OWNER/$REPO/pulls?state=all&per_page=100")
+
+          PR_NUMBERS=$(echo "$PULL_REQUESTS" | jq -r 'if type == "array" then .[].number else empty end')
+
+          for PR in $PR_NUMBERS; do
+            echo "Fetching events for PR #$PR..."
+            PR_EVENTS=$(curl -s -H "Authorization: token $GH_TOKEN" \
+                                   -H "Accept: application/vnd.github.v3+json" \
+                                   "https://api.github.com/repos/$OWNER/$REPO/issues/$PR/events")
+
+            echo "$PR_EVENTS" | jq -r --arg DATE "$SEVEN_DAYS_AGO" --arg PR "$PR" '
+              map(select(.created_at >= $DATE)) |
+              map("PR #\($PR): \(.actor.login) (\(.actor.association // "UNKNOWN")) at \(.created_at)") |
+              .[]
+            '
+          done
+
+          ##########################
+          # 4️⃣ Get Discussion Events
+          ##########################
+          echo "Fetching discussions..."
+          DISCUSSIONS=$(curl -s -H "Authorization: token $GH_TOKEN" \
+                                   -H "Accept: application/vnd.github.v3+json" \
+                                   "https://api.github.com/repos/$OWNER/$REPO/discussions?per_page=100")
+
+          DISCUSSION_NUMBERS=$(echo "$DISCUSSIONS" | jq -r 'if type == "array" then .[].number else empty end')
+
+          for DISCUSSION in $DISCUSSION_NUMBERS; do
+            echo "Fetching comments for Discussion #$DISCUSSION..."
+            DISCUSSION_COMMENTS=$(curl -s -H "Authorization: token $GH_TOKEN" \
+                                         -H "Accept: application/vnd.github.v3+json" \
+                                         "https://api.github.com/repos/$OWNER/$REPO/discussions/$DISCUSSION/comments")
+
+            echo "$DISCUSSION_COMMENTS" | jq -r --arg DATE "$SEVEN_DAYS_AGO" --arg DISCUSSION "$DISCUSSION" '
+              map(select(.created_at >= $DATE)) |
+              map("Discussion #\($DISCUSSION): \(.user.login) at \(.created_at)") |
+              .[]
+            '
+          done
+
+          echo "✅ Activity fetch complete!"
