@@ -9,7 +9,7 @@ jobs:
     steps:
       - name: Get all issues and their events
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
           OWNER: "sukurcf"  # Replace with actual owner
           REPO: "plotcare_be"    # Replace with actual repo name
         run: |
