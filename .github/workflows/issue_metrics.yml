@@ -10,8 +10,8 @@ jobs:
       - name: Get all issues and their events
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          OWNER: "swamysmart"  # Replace with actual owner
-          REPO: "plotcare-be-node"    # Replace with actual repo name
+          OWNER: "sukurcf"  # Replace with actual owner
+          REPO: "plotcare_be"    # Replace with actual repo name
         run: |
           echo "Fetching all issues from $OWNER/$REPO..."
           
