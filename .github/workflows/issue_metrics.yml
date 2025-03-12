@@ -55,7 +55,7 @@ jobs:
 
             echo "$EVENTS" | jq -r --arg DATE "$SEVEN_DAYS_AGO" --arg ISSUE "$ISSUE" '
               map(select(.created_at >= $DATE)) |
-              map("Issue #\($ISSUE): \(.actor.login) (\(.actor.association // "UNKNOWN")) at \(.created_at)") |
+              map("Issue #\($ISSUE): \(.actor.login) (\(.author_association // "UNKNOWN")) at \(.created_at)") |
               .[]
             '
           done
